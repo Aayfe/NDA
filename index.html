@@ -48,6 +48,10 @@
   }
   .btn:hover { background: #5b21b6; }
   .btn:disabled { background: #b9b3c9; border-color: #b9b3c9; cursor: not-allowed; }
+  .btn.is-disabled { background: #b9b3c9; border-color: #b9b3c9; cursor: not-allowed; }
+  .btn.is-disabled:hover { background: #b9b3c9; }
+  .btn.ghost { background: #fff; color: var(--accent); }
+  .btn.ghost:hover { background: #f3eefc; }
 
   /* Document */
   .wrap { max-width: 820px; margin: 28px auto; padding: 0 18px 80px; }
@@ -240,8 +244,8 @@
       <div class="company-sig" id="companySig">Kamil Dusejovsky</div>
       <p class="row"><span class="lab">Name / Jméno:</span> <b>Kamil Dusejovsky</b></p>
       <p class="row"><span class="lab">Title / Funkce:</span> <b>Founder</b></p>
-      <p class="note">Signing on behalf of REVEL Studios, Inc. and REVEL Robotics s.r.o. / Podepisuje jménem REVEL Studios, Inc. a REVEL Robotics s.r.o.</p>
       <p class="row"><span class="lab">Date / Datum:</span> <b id="companyDate"></b></p>
+      <p class="note">Signing on behalf of REVEL Studios, Inc. and REVEL Robotics s.r.o. / Podepisuje jménem REVEL Studios, Inc. a REVEL Robotics s.r.o.</p>
     </div>
 
     <!-- Recipient signing -->
@@ -280,7 +284,8 @@
       </label>
 
       <div class="actions">
-        <button class="btn" id="export" type="button" disabled>Export PDF</button>
+        <button class="btn is-disabled" id="export" type="button">Export PDF</button>
+        <button class="btn ghost" id="reset" type="button">Reset / Vymazat</button>
       </div>
       <div class="status" id="status">Complete all fields and sign to enable PDF export.</div>
     </div>
@@ -295,8 +300,13 @@
     String(today.getMonth() + 1).padStart(2, '0') + '-' +
     String(today.getDate()).padStart(2, '0');
   dateEl.value = iso;
-  // match the date input's displayed (locale) format
-  document.getElementById('companyDate').textContent = today.toLocaleDateString();
+  // every date the document shows/exports uses one format: mm/dd/yyyy
+  function fmtDate(isoStr) {
+    if (!isoStr) return '';
+    var p = isoStr.split('-'); // [yyyy, mm, dd]
+    return p[1] + '/' + p[2] + '/' + p[0];
+  }
+  document.getElementById('companyDate').textContent = fmtDate(iso);
 
   // ---- signature pad ----
   var canvas = document.getElementById('sig');
@@ -358,13 +368,19 @@
   var exportBtn = document.getElementById('export');
 
   function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
-  function isComplete() {
-    return name.value.trim() && dateEl.value &&
-      validEmail(email.value.trim()) && consent.checked && hasSig;
+  function missingFields() {
+    var miss = [];
+    if (!name.value.trim()) miss.push('Name / Jméno');
+    if (!dateEl.value) miss.push('Date / Datum');
+    if (!validEmail(email.value.trim())) miss.push('a valid Email');
+    if (!hasSig) miss.push('Signature / Podpis');
+    if (!consent.checked) miss.push('consent checkbox');
+    return miss;
   }
+  function isComplete() { return missingFields().length === 0; }
   function update() {
     var ok = isComplete();
-    exportBtn.disabled = !ok;
+    exportBtn.classList.toggle('is-disabled', !ok);
     if (ok) { status.textContent = '✓ Ready to export.'; status.className = 'status ok'; }
     else { status.textContent = 'Complete all fields and sign to enable PDF export.'; status.className = 'status'; }
   }
@@ -388,12 +404,12 @@
   }
 
   // ===================================================================
-  //  EMAIL — handled by the Netlify serverless function (Resend).
-  //  No secrets here; the API key lives in Netlify env vars.
+  //  EMAIL — handled by the Netlify serverless function (Gmail SMTP).
+  //  No secrets here; the Gmail App Password lives in Netlify env vars.
   //  Set EMAIL_ENABLED = false to disable auto-emailing (download only).
   // ===================================================================
-  var EMAIL_ENABLED  = true;
-  var SEND_ENDPOINT  = '/.netlify/functions/send-nda';
+  var EMAIL_ENABLED = true;
+  var SEND_ENDPOINT = '/.netlify/functions/send-nda';
 
   // POST the signed PDF (base64) to the serverless function, which emails it
   function sendSignedEmail(doc, fileName) {
@@ -404,7 +420,7 @@
       body: JSON.stringify({
         to: email.value.trim(),
         name: name.value.trim(),
-        date: dateEl.value,
+        date: fmtDate(dateEl.value),
         filename: fileName,
         pdfBase64: base64
       })
@@ -452,8 +468,10 @@
   // ---- export to PDF (programmatic, direct download) ----
   function exportPDF() {
     if (!isComplete()) {
-      status.textContent = 'Please complete all fields and sign first.';
+      var miss = missingFields();
+      status.textContent = 'Please fill in: ' + miss.join(', ') + '.';
       status.className = 'status err';
+      showToast('Still required: ' + miss.join(', ') + '.', 'err');
       return;
     }
     status.textContent = 'Generating PDF…';
@@ -465,13 +483,13 @@
 
     loadFonts(doc).then(function () {
       buildPDF(doc);
-      var fileName = 'REVEL-NDA-' + name.value.trim().replace(/[^a-z0-9]+/gi, '-') + '.pdf';
+      var fileName = 'REVEL-NDA-' + name.value.trim().replace(/[^a-z0-9]+/gi, '-') + '-' + fmtDate(dateEl.value).replace(/\//g, '-') + '.pdf';
       doc.save(fileName);
 
       if (!EMAIL_ENABLED) {
         status.textContent = '✓ PDF downloaded: ' + fileName;
         status.className = 'status ok';
-        showToast('PDF downloaded. (Auto-email is turned off.)', 'info');
+        showToast('Signed PDF downloaded.', 'ok');
         exportBtn.disabled = false;
         return;
       }
@@ -479,9 +497,9 @@
       status.textContent = 'PDF downloaded — sending a copy by email…';
       status.className = 'status';
       sendSignedEmail(doc, fileName).then(function () {
-        status.textContent = '✓ Downloaded and emailed successfully.';
+        status.textContent = '✓ Downloaded and emailed to ' + email.value.trim() + '.';
         status.className = 'status ok';
-        showToast('Signed PDF was emailed successfully.', 'ok');
+        showToast('Signed PDF emailed to ' + email.value.trim() + '.', 'ok');
         exportBtn.disabled = false;
       }).catch(function (err) {
         var reason = err && (err.text || err.message) ? (err.text || err.message) : err;
@@ -573,9 +591,9 @@
 
     para(rt(rows[1]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Name
     para(rt(rows[2]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Title
+    para(rt(rows[3]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Date
     para(document.querySelector('.sigblock .note').textContent.trim(),
       { size: 8, style: 'italic', color: SOFT, x: ix, w: iw, gap: 2 });
-    para(rt(rows[3]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Date
 
     var boxBottom = y + padY - 2;
     doc.setDrawColor(INK[0], INK[1], INK[2]); doc.setLineWidth(0.3);
@@ -591,7 +609,7 @@
       { size: 8.5, style: 'italic', color: MUTED, gap: 4 });
 
     para('Name / Jméno:  ' + name.value.trim(), { size: 9.5, gap: 2 });
-    para('Date / Datum:  ' + dateEl.value, { size: 9.5, gap: 2 });
+    para('Date / Datum:  ' + fmtDate(dateEl.value), { size: 9.5, gap: 2 });
     para('Email:  ' + email.value.trim(), { size: 9.5, gap: 4 });
 
     // signature image
@@ -604,10 +622,29 @@
     doc.line(mL, y + sigH, mL + sigW, y + sigH);
     y += sigH + 5;
 
-    para('Signed by ' + name.value.trim() + ' (' + email.value.trim() + ') on ' + dateEl.value +
+    para('Signed by ' + name.value.trim() + ' (' + email.value.trim() + ') on ' + fmtDate(dateEl.value) +
       ' · Electronically signed via REVEL Robotics secure signing.',
       { size: 7.5, style: 'italic', color: SOFT, gap: 0 });
   }
+
+  // ---- reset all fields ----
+  function clearSignature() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasSig = false;
+    drawing = false;
+    hint.style.display = '';
+  }
+  function resetForm() {
+    name.value = '';
+    email.value = '';
+    dateEl.value = iso;
+    consent.checked = false;
+    clearSignature();
+    update();
+    showToast('Form cleared.', 'info');
+    name.focus();
+  }
+  document.getElementById('reset').addEventListener('click', resetForm);
 
   exportBtn.addEventListener('click', exportPDF);
   update();

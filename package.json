@@ -1,0 +1,9 @@
+{
+  "name": "revel-nda",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REVEL NDA signing page with Gmail-based delivery (Netlify function).",
+  "dependencies": {
+    "nodemailer": "^6.9.14"
+  }
+}
