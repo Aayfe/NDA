@@ -476,19 +476,18 @@
         return;
       }
 
-      var addr = email.value.trim();
-      status.textContent = 'PDF downloaded — emailing a copy to ' + addr + '…';
+      status.textContent = 'PDF downloaded — sending a copy by email…';
       status.className = 'status';
       sendSignedEmail(doc, fileName).then(function () {
-        status.textContent = '✓ Downloaded and emailed to ' + addr + '.';
+        status.textContent = '✓ Downloaded and emailed successfully.';
         status.className = 'status ok';
-        showToast('Signed PDF was sent to ' + addr + '.', 'ok');
+        showToast('Signed PDF was emailed successfully.', 'ok');
         exportBtn.disabled = false;
       }).catch(function (err) {
         var reason = err && (err.text || err.message) ? (err.text || err.message) : err;
-        status.textContent = '✓ PDF downloaded, but email failed: ' + reason;
+        status.textContent = '✓ PDF downloaded, but the email failed: ' + reason;
         status.className = 'status err';
-        showToast('Email could NOT be sent to ' + addr + '. ' + reason, 'err');
+        showToast('PDF downloaded, but the email failed. ' + reason, 'err');
         exportBtn.disabled = false;
       });
     }).catch(function (err) {
