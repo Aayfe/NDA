@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>REVEL Robotics — Non-Disclosure Agreement</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
 <style>
   :root {
     --accent: #4c1d95;
@@ -84,6 +87,11 @@
   .sigblock .row span.lab { color: var(--muted); }
   .sigblock .row b { font-weight: 700; }
   .sigblock .note { font-size: 12px; font-style: italic; color: var(--soft); margin: 4px 0 16px; }
+  .sigblock .company-sig {
+    font-family: "Great Vibes", cursive; font-size: 38px; line-height: 1;
+    color: var(--ink); padding: 4px 0 6px; margin-bottom: 10px;
+    border-bottom: 1px solid var(--line); width: 280px;
+  }
 
   /* Recipient signing */
   .signing { border-top: 2px solid var(--accent); margin-top: 40px; padding-top: 30px; font-family: var(--sans); }
@@ -121,13 +129,29 @@
     .grid { grid-template-columns: 1fr; }
   }
 
-  /* flatten layout while exporting so html2canvas doesn't clip/offset */
-  body.exporting { background: #fff; }
-  body.exporting .wrap { margin: 0; padding: 0; max-width: none; }
-  body.exporting .doc { width: 760px; margin: 0; border: 0; box-shadow: none; padding: 48px; }
+  /* toast notification (email status) */
+  .toast {
+    position: fixed; top: 20px; right: 20px; z-index: 100;
+    max-width: 360px; padding: 14px 18px; border-radius: 8px;
+    color: #fff; font-family: var(--sans); font-size: 14px; line-height: 1.45;
+    box-shadow: 0 8px 28px rgba(0,0,0,.22);
+    display: flex; align-items: flex-start; gap: 10px;
+    opacity: 0; transform: translateY(-12px); transition: opacity .25s, transform .25s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .toast .ico { font-size: 16px; line-height: 1.3; }
+  .toast.ok { background: #15803d; }
+  .toast.err { background: #b91c1c; }
+  .toast.info { background: #374151; }
+  @media (max-width: 640px) {
+    .toast { left: 12px; right: 12px; top: 12px; max-width: none; }
+  }
 </style>
 </head>
 <body>
+
+<div class="toast" id="toast"><span class="ico" id="toastIco"></span><span id="toastMsg"></span></div>
 
 <div class="wrap">
   <div class="doc" id="document">
@@ -212,8 +236,10 @@
     <!-- Company representative block (REVEL) -->
     <div class="sigblock">
       <div class="who">REVEL Studios, Inc. and REVEL Robotics s.r.o.</div>
-      <p class="row"><span class="lab">Name / Jméno:</span> <b>Aneta Janosova</b></p>
-      <p class="row"><span class="lab">Title / Funkce:</span> <b>Executive Assistant</b></p>
+      <p class="row" style="margin-bottom:2px"><span class="lab">By / Podpis:</span></p>
+      <div class="company-sig" id="companySig">Kamil Dusejovsky</div>
+      <p class="row"><span class="lab">Name / Jméno:</span> <b>Kamil Dusejovsky</b></p>
+      <p class="row"><span class="lab">Title / Funkce:</span> <b>Founder</b></p>
       <p class="note">Signing on behalf of REVEL Studios, Inc. and REVEL Robotics s.r.o. / Podepisuje jménem REVEL Studios, Inc. a REVEL Robotics s.r.o.</p>
       <p class="row"><span class="lab">Date / Datum:</span> <b id="companyDate"></b></p>
     </div>
@@ -347,8 +373,51 @@
     el.addEventListener('change', update);
   });
 
-  // ---- embed a Czech-capable font (PT Serif) so diacritics render ----
-  var FONT_BASE = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/ptserif/';
+  // ---- toast notification ----
+  var toastEl = document.getElementById('toast');
+  var toastIco = document.getElementById('toastIco');
+  var toastMsg = document.getElementById('toastMsg');
+  var toastTimer = null;
+  function showToast(msg, kind) {
+    kind = kind || 'info';
+    toastIco.textContent = kind === 'ok' ? '✓' : (kind === 'err' ? '✕' : 'ℹ');
+    toastMsg.textContent = msg;
+    toastEl.className = 'toast show ' + kind;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.className = 'toast ' + kind; }, 6000);
+  }
+
+  // ===================================================================
+  //  EMAIL — handled by the Netlify serverless function (Resend).
+  //  No secrets here; the API key lives in Netlify env vars.
+  //  Set EMAIL_ENABLED = false to disable auto-emailing (download only).
+  // ===================================================================
+  var EMAIL_ENABLED  = true;
+  var SEND_ENDPOINT  = '/.netlify/functions/send-nda';
+
+  // POST the signed PDF (base64) to the serverless function, which emails it
+  function sendSignedEmail(doc, fileName) {
+    var base64 = doc.output('datauristring').split(',')[1];
+    return fetch(SEND_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: email.value.trim(),
+        name: name.value.trim(),
+        date: dateEl.value,
+        filename: fileName,
+        pdfBase64: base64
+      })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+
+  // ---- embed fonts: PT Serif (Czech-capable body) + Great Vibes (signature) ----
+  var GF = 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/';
   var fontPromise = null;
   function bufToB64(buf) {
     var bytes = new Uint8Array(buf), bin = '', chunk = 0x8000;
@@ -359,21 +428,23 @@
   }
   function loadFonts(doc) {
     if (!fontPromise) {
+      // [url, vfsName, family, style]
       var faces = [
-        ['PT_Serif-Web-Regular.ttf', 'PTSerif', 'normal'],
-        ['PT_Serif-Web-Bold.ttf', 'PTSerif', 'bold'],
-        ['PT_Serif-Web-Italic.ttf', 'PTSerif', 'italic'],
-        ['PT_Serif-Web-BoldItalic.ttf', 'PTSerif', 'bolditalic']
+        [GF + 'ptserif/PT_Serif-Web-Regular.ttf', 'PTSerif-Regular.ttf', 'PTSerif', 'normal'],
+        [GF + 'ptserif/PT_Serif-Web-Bold.ttf', 'PTSerif-Bold.ttf', 'PTSerif', 'bold'],
+        [GF + 'ptserif/PT_Serif-Web-Italic.ttf', 'PTSerif-Italic.ttf', 'PTSerif', 'italic'],
+        [GF + 'ptserif/PT_Serif-Web-BoldItalic.ttf', 'PTSerif-BoldItalic.ttf', 'PTSerif', 'bolditalic'],
+        [GF + 'greatvibes/GreatVibes-Regular.ttf', 'GreatVibes-Regular.ttf', 'GreatVibes', 'normal']
       ];
       fontPromise = Promise.all(faces.map(function (f) {
-        return fetch(FONT_BASE + f[0]).then(function (r) { return r.arrayBuffer(); })
-          .then(function (b) { return { vfs: f[0], b64: bufToB64(b), style: f[2] }; });
+        return fetch(f[0]).then(function (r) { return r.arrayBuffer(); })
+          .then(function (b) { return { vfs: f[1], b64: bufToB64(b), family: f[2], style: f[3] }; });
       }));
     }
     return fontPromise.then(function (loaded) {
       loaded.forEach(function (f) {
         doc.addFileToVFS(f.vfs, f.b64);
-        doc.addFont(f.vfs, 'PTSerif', f.style);
+        doc.addFont(f.vfs, f.family, f.style);
       });
     });
   }
@@ -396,12 +467,35 @@
       buildPDF(doc);
       var fileName = 'REVEL-NDA-' + name.value.trim().replace(/[^a-z0-9]+/gi, '-') + '.pdf';
       doc.save(fileName);
-      status.textContent = '✓ PDF downloaded: ' + fileName;
-      status.className = 'status ok';
-      exportBtn.disabled = false;
+
+      if (!EMAIL_ENABLED) {
+        status.textContent = '✓ PDF downloaded: ' + fileName;
+        status.className = 'status ok';
+        showToast('PDF downloaded. (Auto-email is turned off.)', 'info');
+        exportBtn.disabled = false;
+        return;
+      }
+
+      var addr = email.value.trim();
+      status.textContent = 'PDF downloaded — emailing a copy to ' + addr + '…';
+      status.className = 'status';
+      sendSignedEmail(doc, fileName).then(function () {
+        status.textContent = '✓ Downloaded and emailed to ' + addr + '.';
+        status.className = 'status ok';
+        showToast('Signed PDF was sent to ' + addr + '.', 'ok');
+        exportBtn.disabled = false;
+      }).catch(function (err) {
+        var reason = err && (err.text || err.message) ? (err.text || err.message) : err;
+        status.textContent = '✓ PDF downloaded, but email failed: ' + reason;
+        status.className = 'status err';
+        showToast('Email could NOT be sent to ' + addr + '. ' + reason, 'err');
+        exportBtn.disabled = false;
+      });
     }).catch(function (err) {
-      status.textContent = 'Export failed: ' + (err && err.message ? err.message : err);
+      var reason = err && err.message ? err.message : err;
+      status.textContent = 'Export failed: ' + reason;
       status.className = 'status err';
+      showToast('Could not generate the PDF. ' + reason, 'err');
       exportBtn.disabled = false;
     });
   }
@@ -459,17 +553,31 @@
     });
 
     // ---- company representative block ----
-    ensure(40);
-    var boxTop = y, padX = 5, padY = 5;
+    ensure(60);
+    var boxTop = y, padX = 5, padY = 5, ix = mL + padX, iw = contentW - 2 * padX;
+    var rows = document.querySelectorAll('.sigblock .row');
+    function rt(el) { return el.innerText.replace(/\s+/g, ' ').trim(); }
     y = boxTop + padY;
+
     para(document.querySelector('.sigblock .who').textContent.trim(),
-      { size: 9.5, style: 'bold', color: INK, x: mL + padX, w: contentW - 2 * padX, gap: 3 });
-    document.querySelectorAll('.sigblock .row').forEach(function (row) {
-      para(row.innerText.replace(/\s+/g, ' ').trim(),
-        { size: 9, color: INK, x: mL + padX, w: contentW - 2 * padX, gap: 1.5 });
-    });
+      { size: 9.5, style: 'bold', color: INK, x: ix, w: iw, gap: 2.5 });
+
+    // By / Podpis + handwritten signature
+    para('By / Podpis:', { size: 8.5, color: MUTED, x: ix, w: iw, gap: 0.5 });
+    doc.setFont('GreatVibes', 'normal'); doc.setFontSize(30);
+    doc.setTextColor(INK[0], INK[1], INK[2]);
+    ensure(13);
+    doc.text(document.getElementById('companySig').textContent.trim(), ix, y, { baseline: 'top' });
+    y += 11;
+    doc.setDrawColor(150, 150, 150); doc.setLineWidth(0.2);
+    doc.line(ix, y, ix + 78, y); y += 4;
+
+    para(rt(rows[1]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Name
+    para(rt(rows[2]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Title
     para(document.querySelector('.sigblock .note').textContent.trim(),
-      { size: 8, style: 'italic', color: SOFT, x: mL + padX, w: contentW - 2 * padX, gap: 2 });
+      { size: 8, style: 'italic', color: SOFT, x: ix, w: iw, gap: 2 });
+    para(rt(rows[3]), { size: 9, color: INK, x: ix, w: iw, gap: 1.5 }); // Date
+
     var boxBottom = y + padY - 2;
     doc.setDrawColor(INK[0], INK[1], INK[2]); doc.setLineWidth(0.3);
     doc.rect(mL, boxTop, contentW, boxBottom - boxTop);
