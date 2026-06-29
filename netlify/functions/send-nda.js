@@ -1,16 +1,3 @@
-// Netlify serverless function: emails the signed NDA PDF via Gmail SMTP.
-// Free — uses a Gmail account + App Password. No paid service, no domain
-// verification. Secrets stay server-side (Netlify env vars).
-//
-// Required Netlify environment variables:
-//   GMAIL_USER          - the Gmail address that sends the mail, e.g. you@gmail.com
-//   GMAIL_APP_PASSWORD  - a 16-char Google "App Password" (NOT your normal password).
-//                         Requires 2-Step Verification enabled on the account.
-// Optional:
-//   COMPANY_COPY_EMAIL  - address that always gets a copy (default info@revelrobotics.com)
-//   MAIL_FROM           - display name/address shown as sender
-//                         (default: "REVEL NDA <GMAIL_USER>")
-
 const nodemailer = require('nodemailer');
 
 function esc(s) {
@@ -31,11 +18,8 @@ exports.handler = async function (event) {
   }
 
   var payload;
-  try {
-    payload = JSON.parse(event.body || '{}');
-  } catch (e) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body.' }) };
-  }
+  try { payload = JSON.parse(event.body || '{}'); }
+  catch (e) { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body.' }) }; }
 
   var to = (payload.to || '').trim();
   var name = (payload.name || '').trim();
@@ -43,16 +27,12 @@ exports.handler = async function (event) {
   var filename = (payload.filename || 'REVEL-NDA.pdf').trim();
   var pdfBase64 = payload.pdfBase64;
 
-  if (!pdfBase64) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Missing PDF data.' }) };
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid recipient email.' }) };
-  }
+  if (!pdfBase64) return { statusCode: 400, body: JSON.stringify({ error: 'Missing PDF data.' }) };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid recipient email.' }) };
 
   var from = process.env.MAIL_FROM || ('REVEL NDA <' + user + '>');
-  // No copy by default — only CC the company if COMPANY_COPY_EMAIL is explicitly set.
   var companyCopy = (process.env.COMPANY_COPY_EMAIL || '').trim();
+  var ccList = (companyCopy && companyCopy.toLowerCase() !== to.toLowerCase()) ? [companyCopy] : [];
 
   var html =
     '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a">' +
@@ -66,9 +46,6 @@ exports.handler = async function (event) {
     '<p style="color:#888;font-size:12px">REVEL Studios, Inc. &amp; REVEL Robotics s.r.o.</p>' +
     '</div>';
 
-  // de-dupe the company copy if the signer used the same address
-  var ccList = (companyCopy && companyCopy.toLowerCase() !== to.toLowerCase()) ? [companyCopy] : [];
-
   try {
     var transporter = nodemailer.createTransport({
       service: 'gmail',
@@ -81,16 +58,11 @@ exports.handler = async function (event) {
       cc: ccList,
       subject: 'Signed NDA — ' + (name || 'Recipient'),
       html: html,
-      attachments: [{
-        filename: filename,
-        content: pdfBase64,
-        encoding: 'base64',
-        contentType: 'application/pdf'
-      }]
+      attachments: [{ filename: filename, content: pdfBase64, encoding: 'base64', contentType: 'application/pdf' }]
     });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, id: info.messageId }) };
   } catch (e) {
-    return { statusCode: 502, body: JSON.stringify({ error: e.message || 'Failed to send email via Gmail.' }) };
+    return { statusCode: 502, body: JSON.stringify({ error: e.message || 'Failed to send email.' }) };
   }
 };
