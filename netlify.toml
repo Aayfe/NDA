@@ -1,10 +1,4 @@
-# Netlify configuration for the REVEL NDA site
-# Static files are served from the repo root; the serverless function
-# lives in netlify/functions and is reachable at /.netlify/functions/send-nda
-
 [build]
   publish = "."
   functions = "netlify/functions"
-
-# No build step needed (plain static site + a zero-dependency function)
   command = ""
